@@ -2,6 +2,7 @@ from ariadne import QueryType, MutationType, ObjectType
 from database import get_db_connection
 import sqlite3
 
+# --- Object Types ---
 query = QueryType()
 mutation = MutationType()
 character_type = ObjectType("Character")
@@ -9,6 +10,7 @@ planet_type = ObjectType("Planet")
 starship_type = ObjectType("Starship")
 
 # --- Query Resolvers ---
+
 @query.field("allCharacters")
 def resolve_all_characters(_, info):
     conn = get_db_connection()
@@ -63,7 +65,8 @@ def resolve_starship(_, info, id):
     finally:
         conn.close()
 
-# --- Nested Resolvers ---
+# --- Nested Field Resolvers ---
+
 @character_type.field("homePlanet")
 def resolve_character_home_planet(character_obj, info):
     home_planet_id = character_obj.get("home_planet_id")
@@ -81,15 +84,12 @@ def resolve_character_piloted_starships(character_obj, info):
     character_id = character_obj.get("id")
     conn = get_db_connection()
     try:
-        starships = conn.execute(
-            """
+        starships = conn.execute("""
             SELECT s.id, s.name, s.model, s.manufacturer
             FROM starships s
             JOIN character_starships cs ON s.id = cs.starship_id
             WHERE cs.character_id = ?
-            """,
-            (character_id,),
-        ).fetchall()
+        """, (character_id,)).fetchall()
         return [dict(s) for s in starships]
     finally:
         conn.close()
@@ -99,10 +99,11 @@ def resolve_planet_residents(planet_obj, info):
     planet_id = planet_obj.get("id")
     conn = get_db_connection()
     try:
-        characters = conn.execute(
-            "SELECT id, name, species, home_planet_id FROM characters WHERE home_planet_id = ?",
-            (planet_id,),
-        ).fetchall()
+        characters = conn.execute("""
+            SELECT id, name, species, home_planet_id
+            FROM characters
+            WHERE home_planet_id = ?
+        """, (planet_id,)).fetchall()
         return [dict(char) for char in characters]
     finally:
         conn.close()
@@ -112,28 +113,24 @@ def resolve_starship_pilots(starship_obj, info):
     starship_id = starship_obj.get("id")
     conn = get_db_connection()
     try:
-        characters = conn.execute(
-            """
+        characters = conn.execute("""
             SELECT c.id, c.name, c.species, c.home_planet_id
             FROM characters c
             JOIN character_starships cs ON c.id = cs.character_id
             WHERE cs.starship_id = ?
-            """,
-            (starship_id,),
-        ).fetchall()
+        """, (starship_id,)).fetchall()
         return [dict(char) for char in characters]
     finally:
         conn.close()
 
 # --- Mutation Resolvers ---
+
 @mutation.field("createPlanet")
 def resolve_create_planet(_, info, input):
     conn = get_db_connection()
     try:
-        conn.execute(
-            "INSERT INTO planets (name, climate, terrain) VALUES (?, ?, ?)",
-            (input["name"], input.get("climate"), input.get("terrain")),
-        )
+        conn.execute("INSERT INTO planets (name, climate, terrain) VALUES (?, ?, ?)",
+                     (input["name"], input.get("climate"), input.get("terrain")))
         conn.commit()
         planet_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         planet = conn.execute("SELECT id, name, climate, terrain FROM planets WHERE id = ?", (planet_id,)).fetchone()
@@ -151,15 +148,11 @@ def resolve_update_planet(_, info, input):
         planet = conn.execute("SELECT id, name, climate, terrain FROM planets WHERE id = ?", (input["id"],)).fetchone()
         if not planet:
             raise Exception(f"Planet dengan ID {input['id']} tidak ditemukan.")
-        conn.execute(
-            "UPDATE planets SET name = ?, climate = ?, terrain = ? WHERE id = ?",
-            (
-                input.get("name", planet["name"]),
-                input.get("climate", planet["climate"]),
-                input.get("terrain", planet["terrain"]),
-                input["id"],
-            ),
-        )
+        conn.execute("UPDATE planets SET name = ?, climate = ?, terrain = ? WHERE id = ?",
+                     (input.get("name", planet["name"]),
+                      input.get("climate", planet["climate"]),
+                      input.get("terrain", planet["terrain"]),
+                      input["id"]))
         conn.commit()
         updated_planet = conn.execute("SELECT id, name, climate, terrain FROM planets WHERE id = ?", (input["id"],)).fetchone()
         return dict(updated_planet)
@@ -193,15 +186,11 @@ def resolve_create_character(_, info, input):
             planet = conn.execute("SELECT id FROM planets WHERE id = ?", (input["homePlanetId"],)).fetchone()
             if not planet:
                 raise Exception(f"Planet dengan ID {input['homePlanetId']} tidak ditemukan.")
-        conn.execute(
-            "INSERT INTO characters (name, species, home_planet_id) VALUES (?, ?, ?)",
-            (input["name"], input.get("species"), input.get("homePlanetId")),
-        )
+        conn.execute("INSERT INTO characters (name, species, home_planet_id) VALUES (?, ?, ?)",
+                     (input["name"], input.get("species"), input.get("homePlanetId")))
         conn.commit()
         char_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        character = conn.execute(
-            "SELECT id, name, species, home_planet_id FROM characters WHERE id = ?", (char_id,)
-        ).fetchone()
+        character = conn.execute("SELECT id, name, species, home_planet_id FROM characters WHERE id = ?", (char_id,)).fetchone()
         return dict(character)
     except sqlite3.IntegrityError:
         conn.rollback()
@@ -219,17 +208,14 @@ def resolve_assign_starship(_, info, input):
             raise Exception(f"Karakter dengan ID {input['characterId']} tidak ditemukan.")
         if not starship:
             raise Exception(f"Kapal dengan ID {input['starshipId']} tidak ditemukan.")
-        conn.execute(
-            "INSERT OR IGNORE INTO character_starships (character_id, starship_id) VALUES (?, ?)",
-            (input["characterId"], input["starshipId"]),
-        )
+        conn.execute("INSERT OR IGNORE INTO character_starships (character_id, starship_id) VALUES (?, ?)",
+                     (input["characterId"], input["starshipId"]))
         conn.commit()
-        character = conn.execute(
-            "SELECT id, name, species, home_planet_id FROM characters WHERE id = ?",
-            (input["characterId"],),
-        ).fetchone()
+        character = conn.execute("SELECT id, name, species, home_planet_id FROM characters WHERE id = ?",
+                                 (input["characterId"],)).fetchone()
         return dict(character)
     finally:
         conn.close()
 
+# --- Export Resolvers ---
 resolvers = [query, mutation, character_type, planet_type, starship_type]
